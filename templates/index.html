@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>波形分析系统</title>
+<style>
+:root {
+    --primary: #2c3e50;
+    --accent: #3498db;
+    --accent-h: #2980b9;
+    --success: #27ae60;
+    --danger: #e74c3c;
+    --bg: #f0f2f5;
+    --card: #fff;
+    --text: #2c3e50;
+    --muted: #7f8c8d;
+    --border: #e0e6ed;
+    --shadow: 0 2px 12px rgba(0,0,0,.08);
+    --radius: 12px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+
+header{background:linear-gradient(135deg,#1a2332,#2c3e50 60%,#34495e);color:#fff;padding:2.5rem 2rem;text-align:center;position:relative;overflow:hidden}
+header::after{content:"";position:absolute;bottom:-40px;left:-10%;width:120%;height:80px;background:var(--bg);border-radius:50%}
+header h1{font-size:2rem;font-weight:700;letter-spacing:.05em;margin-bottom:.3rem}
+header p{font-size:.95rem;opacity:.75}
+
+main{max-width:1120px;margin:0 auto;padding:2rem 1.5rem 3rem}
+.section-label{font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.75rem}
+
+.mode-row{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:2rem}
+.mode-card{background:var(--card);border:2px solid var(--border);border-radius:var(--radius);padding:1.8rem 1.5rem;text-align:center;cursor:pointer;transition:all .25s;box-shadow:var(--shadow)}
+.mode-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 4px 20px rgba(52,152,219,.15)}
+.mode-card.active{border-color:var(--accent);background:linear-gradient(135deg,rgba(52,152,219,.04),rgba(52,152,219,.10))}
+.mode-card .icon{font-size:2.4rem;margin-bottom:.6rem}
+.mode-card h3{font-size:1.05rem;margin-bottom:.35rem}
+.mode-card p{font-size:.85rem;color:var(--muted)}
+
+.upload-row{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:2rem}
+.upload-card{background:var(--card);border-radius:var(--radius);padding:1.5rem;box-shadow:var(--shadow)}
+.upload-card h3{font-size:.95rem;margin-bottom:.85rem;display:flex;align-items:center;gap:.4rem}
+.upload-area{border:2px dashed var(--border);border-radius:8px;padding:2rem 1rem;text-align:center;cursor:pointer;transition:all .25s}
+.upload-area:hover{border-color:var(--accent);background:rgba(52,152,219,.03)}
+.upload-area.ok{border-color:var(--success);background:rgba(39,174,96,.04)}
+.upload-area input{display:none}
+.upload-area .ico{font-size:2rem;margin-bottom:.35rem}
+.upload-area .hint{font-size:.85rem;color:var(--muted)}
+.upload-area .cnt{font-size:.85rem;color:var(--success);font-weight:600;margin-top:.4rem;display:none}
+
+.btn-wrap{text-align:center;margin-bottom:1.5rem}
+.btn-main{background:linear-gradient(135deg,var(--accent),var(--accent-h));color:#fff;border:none;padding:.9rem 3rem;font-size:1.05rem;font-weight:600;border-radius:50px;cursor:pointer;transition:all .25s;box-shadow:0 4px 15px rgba(52,152,219,.4)}
+.btn-main:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(52,152,219,.5)}
+.btn-main:disabled{background:#bdc3c7;cursor:not-allowed;box-shadow:none;transform:none}
+
+#results{display:none;background:var(--card);border-radius:var(--radius);padding:2rem;box-shadow:var(--shadow);margin-top:.5rem}
+#results h2{font-size:1.25rem;margin-bottom:1.2rem;padding-bottom:.6rem;border-bottom:2px solid var(--border)}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.85rem;margin-bottom:1.8rem}
+.s-item{background:var(--bg);border-radius:8px;padding:.85rem .6rem;text-align:center}
+.s-item .lb{font-size:.75rem;color:var(--muted);margin-bottom:.15rem}
+.s-item .vl{font-size:1.15rem;font-weight:700;color:var(--primary)}
+.img-block{margin-bottom:1.5rem}
+.img-block h3{font-size:1rem;margin-bottom:.6rem;color:var(--primary)}
+.img-block img{width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+
+/* ---- 工具栏 ---- */
+.toolbar{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin:1.5rem 0;padding:1.2rem;background:var(--bg);border-radius:10px}
+.toolbar .toolbar-label{font-size:.85rem;font-weight:600;color:var(--muted);margin-right:.5rem;white-space:nowrap}
+.btn-sm{padding:.5rem 1rem;font-size:.82rem;font-weight:600;border:none;border-radius:6px;cursor:pointer;transition:all .2s}
+.btn-excel{background:#27ae60;color:#fff;box-shadow:0 2px 8px rgba(39,174,96,.3)}
+.btn-excel:hover{background:#219a52;transform:translateY(-1px)}
+.btn-group{background:var(--card);color:var(--primary);border:1.5px solid var(--border);box-shadow:var(--shadow)}
+.btn-group:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+.btn-group.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ---- 分项图展示区 ---- */
+#group-display{margin-top:1rem;display:none}
+#group-display .img-block{animation:fadeUp .35s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:1rem}
+#overlay.show{display:flex}
+.spinner{width:52px;height:52px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#overlay .msg{color:#fff;font-size:1rem;opacity:.9}
+
+.toast{position:fixed;top:1.5rem;right:1.5rem;background:var(--danger);color:#fff;padding:.85rem 1.4rem;border-radius:8px;font-size:.9rem;z-index:1000;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;transform:translateY(-10px);transition:all .3s}
+.toast.show{opacity:1;transform:translateY(0)}
+
+.mini-loader{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,0,0,.15);border-top-color:var(--accent);border-radius:50%;animation:sp .6s linear infinite;vertical-align:middle;margin-left:.4rem}
+</style>
+</head>
+<body>
+
+<header>
+    <h1>波形分析系统</h1>
+    <p>基于 AIC 方法的超声波形初至拾取与特征参数分析</p>
+</header>
+
+<main>
+    <div class="section-label">选择分析模式</div>
+    <div class="mode-row">
+        <div class="mode-card" data-mode="single" onclick="selMode(this)">
+            <div class="icon">📊</div>
+            <h3>单一波形分析</h3>
+            <p>分析单组波形，生成 AIC 拾取图和波形特征分析图</p>
+        </div>
+        <div class="mode-card" data-mode="process" onclick="selMode(this)">
+            <div class="icon">📈</div>
+            <h3>过程波形分析</h3>
+            <p>批量分析全部波形，生成特征参数变化总览图</p>
+        </div>
+    </div>
+
+    <div class="section-label">上传数据文件</div>
+    <div class="upload-row">
+        <div class="upload-card">
+            <h3>📁 ZERO 对零文件夹</h3>
+            <div class="upload-area" id="za" onclick="document.getElementById('zi').click()">
+                <input type="file" id="zi" webkitdirectory multiple onchange="onFiles(this,'za','zc')">
+                <div class="ico">⬆️</div>
+                <div class="hint">点击选择 ZERO 文件夹</div>
+                <div class="cnt" id="zc"></div>
+            </div>
+        </div>
+        <div class="upload-card">
+            <h3>📁 TEST 测试文件夹</h3>
+            <div class="upload-area" id="ta" onclick="document.getElementById('ti').click()">
+                <input type="file" id="ti" webkitdirectory multiple onchange="onFiles(this,'ta','tc')">
+                <div class="ico">⬆️</div>
+                <div class="hint">点击选择 TEST 文件夹</div>
+                <div class="cnt" id="tc"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="btn-wrap">
+        <button class="btn-main" id="go" onclick="doAnalyze()">🚀 开始分析</button>
+    </div>
+
+    <section id="results">
+        <h2>分析结果</h2>
+        <div id="res-body"></div>
+    </section>
+</main>
+
+<div id="overlay">
+    <div class="spinner"></div>
+    <div class="msg" id="overlay-msg">正在分析波形数据，请稍候…</div>
+</div>
+
+<script>
+let mode=null, zeroFiles=[], testFiles=[], sessionId=null;
+
+function selMode(el){
+    document.querySelectorAll('.mode-card').forEach(c=>c.classList.remove('active'));
+    el.classList.add('active');
+    mode=el.dataset.mode;
+}
+function onFiles(inp,areaId,cntId){
+    const csvs=Array.from(inp.files).filter(f=>f.name.toLowerCase().endsWith('.csv'));
+    const area=document.getElementById(areaId), cnt=document.getElementById(cntId);
+    if(areaId==='za') zeroFiles=csvs; else testFiles=csvs;
+    if(csvs.length){area.classList.add('ok');cnt.style.display='block';cnt.textContent='已选择 '+csvs.length+' 个 CSV 文件'}
+}
+function toast(msg){
+    let t=document.createElement('div');t.className='toast show';t.textContent=msg;
+    document.body.appendChild(t);setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),400)},3500);
+}
+function showOverlay(msg){document.getElementById('overlay-msg').textContent=msg||'正在分析波形数据，请稍候…';document.getElementById('overlay').classList.add('show')}
+function hideOverlay(){document.getElementById('overlay').classList.remove('show')}
+
+async function doAnalyze(){
+    if(!mode){toast('请先选择分析模式');return}
+    if(!zeroFiles.length){toast('请上传 ZERO 文件夹');return}
+    if(!testFiles.length){toast('请上传 TEST 文件夹');return}
+    const fd=new FormData();fd.append('mode',mode);
+    zeroFiles.forEach(f=>fd.append('zero_files',f));
+    testFiles.forEach(f=>fd.append('test_files',f));
+    showOverlay();document.getElementById('go').disabled=true;
+    try{
+        const r=await fetch('/api/analyze',{method:'POST',body:fd});
+        const d=await r.json();
+        if(d.error){toast(d.error);return}
+        render(d);
+    }catch(e){toast('请求失败: '+e.message)}
+    finally{hideOverlay();document.getElementById('go').disabled=false}
+}
+
+function si(lb,vl){return `<div class="s-item"><div class="lb">${lb}</div><div class="vl">${vl}</div></div>`}
+
+function render(d){
+    const sec=document.getElementById('results');sec.style.display='block';
+    let h='<div class="summary-grid">';
+    if(d.mode==='single'){
+        const s=d.summary;
+        h+=si('分析文件',s.file);
+        h+=si('波速',s.velocity_ms?s.velocity_ms+' m/s':'N/A');
+        h+=si('传播时间',s.travel_time_us+' μs');
+        h+=si('ZERO到时',s.zero_arrival_us+' μs');
+        h+=si('TEST到时',s.test_arrival_us+' μs');
+        h+=si('CH1 初至',s.ch1_onset_us+' μs');
+        h+=si('CH2 初至',s.ch2_onset_us+' μs');
+        h+=si('最大振幅',s.peak_amplitude+' V');
+        h+=si('峰峰值',s.peak_to_peak+' V');
+        h+=si('RMS振幅',s.rms_amplitude+' V');
+        h+=si('主频',s.dominant_freq_khz+' kHz');
+        h+=si('频谱重心',s.centroid_freq_khz+' kHz');
+        h+=si('带宽',s.bandwidth_khz+' kHz');
+        h+=si('总能量',s.total_energy);
+        h+=si('上升时间',s.rise_time_us+' μs');
+        h+=si('信噪比',s.snr_db+' dB');
+    }else{
+        const s=d.summary;
+        h+=si('文件数',s.n_files+' 组');
+        h+=si('波速均值',(s.velocity_mean||'N/A')+' m/s');
+        h+=si('标准差',(s.velocity_std||'N/A')+' m/s');
+        h+=si('中位数',(s.velocity_median||'N/A')+' m/s');
+        h+=si('最小值',(s.velocity_min||'N/A')+' m/s');
+        h+=si('最大值',(s.velocity_max||'N/A')+' m/s');
+    }
+    h+='</div>';
+
+    if(d.images.aic_pick)
+        h+=`<div class="img-block"><h3>AIC 初至拾取结果</h3><img src="data:image/png;base64,${d.images.aic_pick}"></div>`;
+    if(d.images.waveform_analysis)
+        h+=`<div class="img-block"><h3>波形特征分析</h3><img src="data:image/png;base64,${d.images.waveform_analysis}"></div>`;
+    if(d.images.overview)
+        h+=`<div class="img-block"><h3>波形特征参数变化总览</h3><img src="data:image/png;base64,${d.images.overview}"></div>`;
+
+    if(d.mode==='process' && d.session_id){
+        sessionId=d.session_id;
+        h+=`<div class="toolbar">`;
+        h+=`<span class="toolbar-label">导出：</span>`;
+        h+=`<button class="btn-sm btn-excel" onclick="dlExcel()">📥 导出 Excel</button>`;
+        h+=`<span class="toolbar-label" style="margin-left:1rem">分项曲线：</span>`;
+        d.groups.forEach(g=>{
+            h+=`<button class="btn-sm btn-group" data-idx="${g.idx}" onclick="loadGroup(this,${g.idx})">${g.title}</button>`;
+        });
+        h+=`</div>`;
+        h+=`<div id="group-display"></div>`;
+    }
+
+    document.getElementById('res-body').innerHTML=h;
+    sec.scrollIntoView({behavior:'smooth'});
+}
+
+function dlExcel(){
+    if(!sessionId){toast('请先进行过程分析');return}
+    window.open('/api/export_excel/'+sessionId,'_blank');
+}
+
+async function loadGroup(btn,idx){
+    if(!sessionId)return;
+    document.querySelectorAll('.btn-group').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const gd=document.getElementById('group-display');
+    gd.style.display='block';
+    gd.innerHTML=`<div style="text-align:center;padding:2rem;color:var(--muted)"><span class="mini-loader"></span> 正在生成图表…</div>`;
+    try{
+        const r=await fetch(`/api/group_plot/${sessionId}/${idx}`);
+        const d=await r.json();
+        if(d.error){gd.innerHTML=`<p style="color:var(--danger)">${d.error}</p>`;return}
+        gd.innerHTML=`<div class="img-block"><img src="data:image/png;base64,${d.image}"></div>`;
+    }catch(e){gd.innerHTML=`<p style="color:var(--danger)">加载失败: ${e.message}</p>`}
+}
+</script>
+</body>
+</html>
