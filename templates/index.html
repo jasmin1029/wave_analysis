@@ -607,13 +607,23 @@ async function loadDirectWave(btn) {
             cur.onload = () => cur.classList.remove('fading');
             cur.src = newSrc;
         } else {
-            dwd.innerHTML = `<div class="img-block"><img src="${newSrc}"></div>`;
+            dwd.innerHTML = `<div class="img-block"><img src="${newSrc}"></div>
+                <div class="toolbar" style="margin-top:.6rem">
+                    <span class="toolbar-label">导出</span>
+                    <button class="btn-sm btn-excel" onclick="dlDirectWaveExcel()">📥 导出直达波 Excel</button>
+                </div>`;
+            staggerReveal(dwd);
         }
     } catch (e) {
         toast('直达波分析失败: ' + e.message);
         btn.classList.remove('active');
         dwd.style.display = 'none';
     }
+}
+
+function dlDirectWaveExcel() {
+    if (!sessionId) { toast('请先进行分析'); return; }
+    window.open('/api/export_direct_wave_excel/' + sessionId, '_blank');
 }
 
 async function loadGroup(btn, idx) {

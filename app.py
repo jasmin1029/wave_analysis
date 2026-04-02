@@ -744,20 +744,43 @@ def export_excel(sid):
     )
 
 
-def _fig_direct_wave(filename, time_s, waveform, onset_idx, fs):
-    """绘制直达波分析图（2×2 布局）"""
-    # 估算直达波窗口：基于主频，取 2.5 个周期或至少 64 点
+def _direct_wave_slice(waveform, onset_idx, fs):
+    """
+    提取直达波窗口。
+    策略：以主频估算 2.0 个周期为上限，同时用包络衰减截断——
+    当包络降至峰值的 8% 以下时停止，取两者中较短者。
+    最少 48 个采样点。
+    """
     from waveform_analysis import frequency_params
-    fp = frequency_params(waveform[onset_idx:], fs)
+    from scipy.signal import hilbert as _hilbert
+    seg = waveform[onset_idx:]
+    fp = frequency_params(seg, fs)
     dom_f = fp["dominant_freq"]
     if dom_f > 0:
-        win_samples = int(2.5 * fs / dom_f)
+        period_win = int(2.0 * fs / dom_f)
     else:
-        win_samples = min(256, len(waveform) - onset_idx)
-    win_samples = max(win_samples, 64)
-    end_idx = min(onset_idx + win_samples, len(waveform))
+        period_win = min(256, len(seg))
+    period_win = min(period_win, len(seg))
 
-    dw = waveform[onset_idx:end_idx]
+    # 包络衰减截断：峰值后降至 8% 以下才截断
+    env = np.abs(_hilbert(seg[:period_win]))
+    peak_val = env.max() if env.size else 1.0
+    peak_pos = int(np.argmax(env))
+    below = np.where(env < 0.08 * peak_val)[0]
+    after_peak = below[below > peak_pos]
+    if after_peak.size > 0:
+        envelope_win = int(after_peak[0])
+    else:
+        envelope_win = period_win
+
+    win_samples = max(min(period_win, envelope_win), 48)
+    end_idx = onset_idx + win_samples
+    return waveform[onset_idx:end_idx], end_idx
+
+
+def _fig_direct_wave(filename, time_s, waveform, onset_idx, fs):
+    """绘制直达波分析图（2×2 布局）"""
+    dw, end_idx = _direct_wave_slice(waveform, onset_idx, fs)
     t_full_us = time_s * 1e6
     t_dw_us = t_full_us[onset_idx:end_idx]
 
@@ -869,6 +892,87 @@ def direct_wave(sid):
 
     fig = _fig_direct_wave(filename, time_s, waveform, onset_idx, fs)
     return jsonify({"image": _fig_to_b64(fig)})
+
+
+def _build_direct_wave_excel_bytes(filename, waveform, onset_idx, fs):
+    """为直达波特征参数构建 Excel 文件"""
+    dw, end_idx = _direct_wave_slice(waveform, onset_idx, fs)
+    ar = analyze_waveform(dw, 0, fs)
+    amp = ar["amplitude"]; freq = ar["frequency"]
+    eng = ar["energy"]; comp = ar["complexity"]
+    atten = ar["attenuation"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "直达波特征参数"
+
+    hf = Font(name="微软雅黑", bold=True, color="FFFFFF", size=10)
+    hfill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+    ha = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    tb = Border(*(Side(style="thin"),) * 4)
+    df_font = Font(name="Consolas", size=9)
+    da = Alignment(horizontal="center", vertical="center")
+    alt = PatternFill(start_color="F0F3F5", end_color="F0F3F5", fill_type="solid")
+
+    headers = [
+        "文件名", "采样率\n(MHz)", "初至采样点",
+        "直达波窗口\n(采样点数)", "直达波时长\n(μs)",
+        "最大振幅", "峰峰值", "RMS振幅", "平均绝对振幅",
+        "主频\n(kHz)", "频谱重心\n(kHz)", "带宽\n(kHz)",
+        "总能量", "上升时间\n(μs)",
+        "过零率", "峰值因子", "波形因子", "脉冲因子", "峭度", "偏度",
+        "频谱熵\n(bits)", "衰减系数\n(/s)", "品质因子Q", "信噪比\n(dB)",
+    ]
+
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=ci, value=h)
+        c.font = hf; c.fill = hfill; c.alignment = ha; c.border = tb
+
+    row_vals = [
+        filename, fs / 1e6, onset_idx,
+        end_idx - onset_idx, (end_idx - onset_idx) / fs * 1e6,
+        amp["peak_amplitude"], amp["peak_to_peak"], amp["rms_amplitude"], amp["mean_abs_amplitude"],
+        freq["dominant_freq"] / 1e3, freq["centroid_freq"] / 1e3, freq["bandwidth"] / 1e3,
+        eng["total_energy"], eng["rise_time_s"] * 1e6,
+        comp["zero_crossing_rate"], comp["crest_factor"], comp["form_factor"],
+        comp["impulse_factor"], comp["kurtosis"], comp["skewness"],
+        comp["spectral_entropy"], atten["decay_coefficient"], atten["quality_factor_Q"],
+        ar["estimated_snr_db"],
+    ]
+
+    for ci, val in enumerate(row_vals, 1):
+        c = ws.cell(row=2, column=ci, value=round(val, 6) if isinstance(val, float) else val)
+        c.font = df_font; c.alignment = da; c.border = tb
+
+    widths = [38,9,10,12,12,14,14,12,14,10,12,10,14,10,8,10,10,10,8,8,10,10,10,10]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@app.route("/api/export_direct_wave_excel/<sid>")
+def export_direct_wave_excel(sid):
+    entry = _cache.get(sid)
+    if not entry:
+        return jsonify({"error": "会话已过期，请重新分析"}), 404
+    waveform = entry.get("waveform")
+    if waveform is None:
+        return jsonify({"error": "缓存中无波形数据，请重新分析"}), 400
+
+    buf = _build_direct_wave_excel_bytes(
+        entry.get("filename", ""), entry["waveform"], entry["onset_idx"], entry["fs"]
+    )
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="direct_wave_analysis.xlsx",
+    )
 
 
 if __name__ == "__main__":
