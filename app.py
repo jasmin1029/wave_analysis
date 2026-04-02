@@ -10,6 +10,7 @@ import re
 import tempfile
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import matplotlib
@@ -389,18 +390,39 @@ def _fig_group(param_data_list, x, group_idx):
     grp = PARAM_GROUPS[group_idx]
     params = grp["params"]
     n = len(params)
-    fig, axes = plt.subplots(n, 1, figsize=(14, 3.2 * n), constrained_layout=True)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 3.6 * n), constrained_layout=True)
     if n == 1:
         axes = [axes]
 
-    fig.suptitle(f"{grp['title']} 变化曲线", fontsize=15, fontweight="bold")
+    fig.patch.set_facecolor("#ffffff")
+    fig.suptitle(f"{grp['title']}  变化曲线", fontsize=15, fontweight="bold",
+                 color="#1a2332", y=1.01)
 
     for ax, (name, color) in zip(axes, params):
         y = np.array([p[name] for p in param_data_list], dtype=float)
-        valid = np.isfinite(y); xv, yv = x[valid], y[valid]
+        valid = np.isfinite(y)
+        xv, yv = x[valid], y[valid]
 
-        ax.plot(xv, yv, "o-", color=color, markersize=3, linewidth=1.0, alpha=0.85)
+        ax.set_facecolor("#fdfdff")
 
+        mean_v = np.nanmean(yv) if len(yv) else np.nan
+        std_v  = np.nanstd(yv)  if len(yv) else np.nan
+
+        # ±1σ 阴影带
+        if len(yv) > 2 and np.isfinite(std_v):
+            ax.axhspan(mean_v - std_v, mean_v + std_v,
+                       color=color, alpha=0.07, zorder=0, lw=0)
+
+        # 曲线下方填充
+        ax.fill_between(xv, yv, alpha=0.10, color=color, zorder=1)
+
+        # 主折线：空心圆标记
+        ax.plot(xv, yv, "o-", color=color,
+                markersize=5, linewidth=1.6, alpha=0.9,
+                markerfacecolor="white", markeredgewidth=1.8,
+                markeredgecolor=color, zorder=3, label="实测值")
+
+        # 趋势线（Savitzky-Golay）
         if len(yv) > 5:
             window = min(7, len(yv) // 3)
             if window >= 3 and window % 2 == 0:
@@ -408,24 +430,42 @@ def _fig_group(param_data_list, x, group_idx):
             if window >= 3:
                 try:
                     smooth = savgol_filter(yv, window, 2)
-                    ax.plot(xv, smooth, "-", color="black", linewidth=1.8,
-                            alpha=0.6, label="趋势线")
-                    ax.legend(loc="upper right", fontsize=8)
+                    ax.plot(xv, smooth, "-", color="#2c3e50",
+                            linewidth=2.2, alpha=0.50, zorder=2, label="趋势线")
                 except Exception:
                     pass
 
-        ax.set_ylabel(name, fontsize=10)
-        ax.grid(True, alpha=0.3)
+        # 均值虚线
+        if np.isfinite(mean_v):
+            ax.axhline(mean_v, color=color, ls="--", lw=1.1, alpha=0.45, zorder=1)
+
+        # 坐标轴样式
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color("#d0d8e4")
+        ax.spines["bottom"].set_color("#d0d8e4")
+        ax.tick_params(colors="#718096", labelsize=8)
+        ax.set_ylabel(name, fontsize=10, color="#4a5568", labelpad=8)
+        ax.grid(axis="y", color="#e2e8f0", linewidth=0.8, zorder=0)
+        ax.grid(axis="x", color="#edf2f7", linewidth=0.6, zorder=0)
+        ax.set_axisbelow(True)
         ax.set_xlim(x[0] - 0.5, x[-1] + 0.5)
 
-        mean_v = np.nanmean(yv)
-        std_v = np.nanstd(yv)
-        ax.axhline(mean_v, color="gray", ls=":", lw=1, alpha=0.5)
-        ax.text(0.01, 0.95, f"均值={mean_v:.4g}  σ={std_v:.4g}",
-                transform=ax.transAxes, fontsize=8, va="top",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+        # 统计标注（右上角）
+        if np.isfinite(mean_v):
+            ax.text(0.99, 0.03,
+                    f"均值  {mean_v:.4g}     σ  {std_v:.4g}",
+                    transform=ax.transAxes, fontsize=8.5, va="bottom", ha="right",
+                    color="#4a5568",
+                    bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
+                              edgecolor="#d0d8e4", alpha=0.92, linewidth=0.8))
 
-    axes[-1].set_xlabel("测量序号", fontsize=11)
+        handles, labels = ax.get_legend_handles_labels()
+        if labels:
+            ax.legend(handles, labels, loc="upper left", fontsize=8,
+                      framealpha=0.92, edgecolor="#d0d8e4", fancybox=True)
+
+    axes[-1].set_xlabel("测量序号", fontsize=11, color="#4a5568")
     return fig
 
 
@@ -543,11 +583,35 @@ def _do_single(zd, td):
 
     ar = analyze_waveform(c2["waveform"], c2["onset_idx"], c2["fs"])
 
+    record = {
+        "test_arrival_us": ta,
+        "ch1_onset_us": c1["onset_time_us"],
+        "ch2_onset_us": c2["onset_time_us"],
+        "ch2_file": ch2p.name,
+        "timestamp": _parse_timestamp(ch2p.name),
+        "fs": c2["fs"],
+        "n_samples": c2["n_samples"],
+        "analysis": ar,
+    }
+    pd = _extract_flat_params(record, za)
+    sid = uuid.uuid4().hex[:12]
+    _cache[sid] = {
+        "records": [record],
+        "param_data_list": [pd],
+        "zero_arrival_us": za,
+        "waveform": c2["waveform"],
+        "onset_idx": c2["onset_idx"],
+        "fs": c2["fs"],
+        "time_s": c2["time_s"],
+        "filename": ch2p.name,
+    }
+
     f1 = _fig_aic_pick(ch2p.name, c2["time_s"], c2["waveform"], c2["onset_idx"])
     f2 = _fig_analysis(c2["time_s"], c2["waveform"], ar, c2["fs"])
 
     return jsonify({
         "mode": "single",
+        "session_id": sid,
         "summary": {
             "file": ch2p.name,
             "velocity_ms": round(vel, 1) if vel else None,
@@ -573,6 +637,27 @@ def _do_single(zd, td):
     })
 
 
+def _process_pair(ch2p: Path, td: Path) -> dict | None:
+    """处理单个文件对，供并行调用。返回 None 表示跳过（找不到 CH1）。"""
+    ch1p = _find_ch1(ch2p, td)
+    if not ch1p:
+        return None
+    c1 = _pick(ch1p)
+    c2 = _pick(ch2p, skip_exc=True)
+    ar = analyze_waveform(c2["waveform"], c2["onset_idx"], c2["fs"])
+    ta = c2["onset_time_us"] - c1["onset_time_us"]
+    return {
+        "test_arrival_us": ta,
+        "ch1_onset_us": c1["onset_time_us"],
+        "ch2_onset_us": c2["onset_time_us"],
+        "ch2_file": ch2p.name,
+        "timestamp": _parse_timestamp(ch2p.name),
+        "fs": c2["fs"],
+        "n_samples": c2["n_samples"],
+        "analysis": ar,
+    }
+
+
 def _do_process(zd, td):
     za, _, _ = _zero_arrival(zd)
 
@@ -581,24 +666,14 @@ def _do_process(zd, td):
         return jsonify({"error": "TEST 文件夹中未找到 CH2 文件"}), 400
 
     records = []
-    for ch2p in ch2s:
-        ch1p = _find_ch1(ch2p, td)
-        if not ch1p:
-            continue
-        c1 = _pick(ch1p)
-        c2 = _pick(ch2p, skip_exc=True)
-        ar = analyze_waveform(c2["waveform"], c2["onset_idx"], c2["fs"])
-        ta = c2["onset_time_us"] - c1["onset_time_us"]
-        records.append({
-            "test_arrival_us": ta,
-            "ch1_onset_us": c1["onset_time_us"],
-            "ch2_onset_us": c2["onset_time_us"],
-            "ch2_file": ch2p.name,
-            "timestamp": _parse_timestamp(ch2p.name),
-            "fs": c2["fs"],
-            "n_samples": c2["n_samples"],
-            "analysis": ar,
-        })
+    with ThreadPoolExecutor() as pool:
+        futures = {pool.submit(_process_pair, ch2p, td): ch2p for ch2p in ch2s}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                records.append(result)
+
+    records.sort(key=lambda r: r["ch2_file"])
 
     if not records:
         return jsonify({"error": "未能成功处理任何文件对"}), 400
@@ -667,6 +742,133 @@ def export_excel(sid):
         as_attachment=True,
         download_name="ultrasonic_velocity_analysis.xlsx",
     )
+
+
+def _fig_direct_wave(filename, time_s, waveform, onset_idx, fs):
+    """绘制直达波分析图（2×2 布局）"""
+    # 估算直达波窗口：基于主频，取 2.5 个周期或至少 64 点
+    from waveform_analysis import frequency_params
+    fp = frequency_params(waveform[onset_idx:], fs)
+    dom_f = fp["dominant_freq"]
+    if dom_f > 0:
+        win_samples = int(2.5 * fs / dom_f)
+    else:
+        win_samples = min(256, len(waveform) - onset_idx)
+    win_samples = max(win_samples, 64)
+    end_idx = min(onset_idx + win_samples, len(waveform))
+
+    dw = waveform[onset_idx:end_idx]
+    t_full_us = time_s * 1e6
+    t_dw_us = t_full_us[onset_idx:end_idx]
+
+    ar_dw = analyze_waveform(dw, 0, fs)
+    freq = ar_dw["frequency"]
+    eng = ar_dw["energy"]
+    atten = ar_dw["attenuation"]
+    amp = ar_dw["amplitude"]
+    comp = ar_dw["complexity"]
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+    fig.patch.set_facecolor("#ffffff")
+    fig.suptitle(f"直达波特征分析 — {filename}", fontsize=14, fontweight="bold", color="#1a2332")
+
+    # ── 左上：完整波形 + 直达波高亮窗口
+    ax = axes[0, 0]
+    ax.set_facecolor("#fdfdff")
+    ax.plot(t_full_us, waveform, color="#888", lw=0.5, alpha=0.6, label="完整波形")
+    ax.axvspan(t_full_us[onset_idx], t_full_us[end_idx - 1],
+               color="#3498db", alpha=0.15, label="直达波窗口")
+    ax.axvline(t_full_us[onset_idx], color="#3498db", ls="--", lw=1.5,
+               label=f"初至 {t_full_us[onset_idx]:.1f} μs")
+    ax.set(xlabel="时间 (μs)", ylabel="振幅", title="完整波形 & 直达波窗口")
+    ax.legend(fontsize=8, loc="upper right")
+    ax.grid(True, alpha=0.2)
+    for sp in ["top", "right"]:
+        ax.spines[sp].set_visible(False)
+
+    # ── 右上：放大的直达波 + 包络
+    ax = axes[0, 1]
+    ax.set_facecolor("#fdfdff")
+    ax.plot(t_dw_us, dw, color="#2c3e50", lw=1.0, label="直达波")
+    ax.plot(t_dw_us, atten["envelope"], color="#e74c3c", lw=1.2, alpha=0.85, label="包络")
+    ax.fill_between(t_dw_us, dw, alpha=0.08, color="#2c3e50")
+    ax.set(xlabel="时间 (μs)", ylabel="振幅", title="直达波放大图")
+    ax.legend(fontsize=8, loc="upper right")
+    ax.grid(True, alpha=0.2)
+    for sp in ["top", "right"]:
+        ax.spines[sp].set_visible(False)
+
+    # ── 左下：频谱
+    ax = axes[1, 0]
+    ax.set_facecolor("#fdfdff")
+    fk = freq["freq_axis"] / 1e3
+    sp = freq["spectrum"]
+    ax.plot(fk, sp, color="#e74c3c", lw=0.9)
+    ax.fill_between(fk, sp, alpha=0.15, color="#e74c3c")
+    ax.axvline(freq["dominant_freq"] / 1e3, color="#3498db", ls="--", lw=1.5,
+               label=f"主频 {freq['dominant_freq']/1e3:.1f} kHz")
+    ax.axvline(freq["centroid_freq"] / 1e3, color="#2ecc71", ls="--", lw=1.5,
+               label=f"重心 {freq['centroid_freq']/1e3:.1f} kHz")
+    ax.set(xlabel="频率 (kHz)", ylabel="幅值谱", title="直达波频谱")
+    ax.set_xlim(0, max(fk[-1] * 0.6, freq["dominant_freq"] / 1e3 * 3))
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.2)
+    for sp_name in ["top", "right"]:
+        ax.spines[sp_name].set_visible(False)
+
+    # ── 右下：特征参数汇总表
+    ax = axes[1, 1]
+    ax.set_facecolor("#fdfdff")
+    ax.axis("off")
+    tbl_data = [
+        ["参数类别", "指标", "数值"],
+        ["波幅", "最大振幅", f"{amp['peak_amplitude']:.6f}"],
+        ["波幅", "峰峰值", f"{amp['peak_to_peak']:.6f}"],
+        ["波幅", "RMS 振幅", f"{amp['rms_amplitude']:.6f}"],
+        ["频率", "主频", f"{freq['dominant_freq']/1e3:.2f} kHz"],
+        ["频率", "频谱重心", f"{freq['centroid_freq']/1e3:.2f} kHz"],
+        ["频率", "带宽", f"{freq['bandwidth']/1e3:.2f} kHz"],
+        ["能量", "总能量", f"{eng['total_energy']:.4e}"],
+        ["能量", "上升时间", f"{eng['rise_time_s']*1e6:.2f} μs"],
+        ["复杂度", "过零率", f"{comp['zero_crossing_rate']:.4f}"],
+        ["复杂度", "峭度", f"{comp['kurtosis']:.4f}"],
+        ["复杂度", "频谱熵", f"{comp['spectral_entropy']:.2f} bits"],
+        ["衰减", "衰减系数", f"{atten['decay_coefficient']:.1f} /s"],
+        ["衰减", "品质因子 Q", f"{atten['quality_factor_Q']:.1f}"],
+        ["SNR", "估算信噪比", f"{ar_dw['estimated_snr_db']:.1f} dB"],
+    ]
+    table = ax.table(cellText=tbl_data, loc="center", cellLoc="center")
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.5)
+    for j in range(3):
+        table[0, j].set_facecolor("#2c3e50")
+        table[0, j].set_text_props(color="white", fontweight="bold")
+    for r in range(1, len(tbl_data)):
+        if r % 2 == 0:
+            for c in range(3):
+                table[r, c].set_facecolor("#f0f3f5")
+    ax.set_title("直达波特征参数汇总", fontsize=11, pad=15)
+
+    return fig
+
+
+@app.route("/api/direct_wave/<sid>")
+def direct_wave(sid):
+    entry = _cache.get(sid)
+    if not entry:
+        return jsonify({"error": "会话已过期，请重新分析"}), 404
+    waveform = entry.get("waveform")
+    if waveform is None:
+        return jsonify({"error": "缓存中无波形数据，请重新分析"}), 400
+
+    onset_idx = entry["onset_idx"]
+    fs = entry["fs"]
+    time_s = entry["time_s"]
+    filename = entry.get("filename", "")
+
+    fig = _fig_direct_wave(filename, time_s, waveform, onset_idx, fs)
+    return jsonify({"image": _fig_to_b64(fig)})
 
 
 if __name__ == "__main__":
