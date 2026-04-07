@@ -746,13 +746,14 @@ def export_excel(sid):
 
 def _direct_wave_slice(waveform, onset_idx, fs):
     """
-    提取直达波窗口。
+    提取直达波窗口，并生成加窗版本（用于频谱分析，防止泄露）。
     策略：以主频估算 2.0 个周期为上限，同时用包络衰减截断——
     当包络降至峰值的 8% 以下时停止，取两者中较短者。
     最少 48 个采样点。
+    返回 (dw_raw, dw_windowed, end_idx)
     """
     from waveform_analysis import frequency_params
-    from scipy.signal import hilbert as _hilbert
+    from scipy.signal import hilbert as _hilbert, windows as _wins
     seg = waveform[onset_idx:]
     fp = frequency_params(seg, fs)
     dom_f = fp["dominant_freq"]
@@ -775,16 +776,21 @@ def _direct_wave_slice(waveform, onset_idx, fs):
 
     win_samples = max(min(period_win, envelope_win), 48)
     end_idx = onset_idx + win_samples
-    return waveform[onset_idx:end_idx], end_idx
+    dw_raw = waveform[onset_idx:end_idx]
+    # Tukey 窗（alpha=0.25）：仅对头尾各 12.5% 做余弦渐变，中段保持平坦
+    tukey = _wins.tukey(len(dw_raw), alpha=0.25)
+    dw_windowed = dw_raw * tukey
+    return dw_raw, dw_windowed, end_idx
 
 
 def _fig_direct_wave(filename, time_s, waveform, onset_idx, fs):
     """绘制直达波分析图（2×2 布局）"""
-    dw, end_idx = _direct_wave_slice(waveform, onset_idx, fs)
+    dw, dw_win, end_idx = _direct_wave_slice(waveform, onset_idx, fs)
     t_full_us = time_s * 1e6
     t_dw_us = t_full_us[onset_idx:end_idx]
 
-    ar_dw = analyze_waveform(dw, 0, fs)
+    # 加窗信号用于所有特征分析（抑制频谱泄露），原始信号用于波形图展示
+    ar_dw = analyze_waveform(dw_win, 0, fs)
     freq = ar_dw["frequency"]
     eng = ar_dw["energy"]
     atten = ar_dw["attenuation"]
@@ -809,13 +815,14 @@ def _fig_direct_wave(filename, time_s, waveform, onset_idx, fs):
     for sp in ["top", "right"]:
         ax.spines[sp].set_visible(False)
 
-    # ── 右上：放大的直达波 + 包络
+    # ── 右上：放大的直达波（原始）+ 加窗信号 + 包络
     ax = axes[0, 1]
     ax.set_facecolor("#fdfdff")
-    ax.plot(t_dw_us, dw, color="#2c3e50", lw=1.0, label="直达波")
+    ax.plot(t_dw_us, dw, color="#2c3e50", lw=1.0, alpha=0.5, label="直达波（原始）")
+    ax.plot(t_dw_us, dw_win, color="#3498db", lw=1.2, label="加 Tukey 窗后")
     ax.plot(t_dw_us, atten["envelope"], color="#e74c3c", lw=1.2, alpha=0.85, label="包络")
-    ax.fill_between(t_dw_us, dw, alpha=0.08, color="#2c3e50")
-    ax.set(xlabel="时间 (μs)", ylabel="振幅", title="直达波放大图")
+    ax.fill_between(t_dw_us, dw_win, alpha=0.08, color="#3498db")
+    ax.set(xlabel="时间 (μs)", ylabel="振幅", title="直达波放大图（Tukey 窗）")
     ax.legend(fontsize=8, loc="upper right")
     ax.grid(True, alpha=0.2)
     for sp in ["top", "right"]:
@@ -896,8 +903,8 @@ def direct_wave(sid):
 
 def _build_direct_wave_excel_bytes(filename, waveform, onset_idx, fs):
     """为直达波特征参数构建 Excel 文件"""
-    dw, end_idx = _direct_wave_slice(waveform, onset_idx, fs)
-    ar = analyze_waveform(dw, 0, fs)
+    dw, dw_win, end_idx = _direct_wave_slice(waveform, onset_idx, fs)
+    ar = analyze_waveform(dw_win, 0, fs)  # 加 Tukey 窗后分析，抑制频谱泄露
     amp = ar["amplitude"]; freq = ar["frequency"]
     eng = ar["energy"]; comp = ar["complexity"]
     atten = ar["attenuation"]
