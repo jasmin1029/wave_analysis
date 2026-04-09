@@ -16,6 +16,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as _fm
 import numpy as np
 from matplotlib import rcParams
 from flask import Flask, render_template, request, jsonify, send_file
@@ -31,7 +32,26 @@ from process_folder_csv import (
     preprocess_voltage, find_excitation_end,
 )
 
-rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
+# ── 中文字体注册：主动向 font manager 注册字体文件，避免缓存失效导致乱码 ──
+_WIN_FONT_CANDIDATES = [
+    ("C:/Windows/Fonts/msyh.ttc",    "Microsoft YaHei"),
+    ("C:/Windows/Fonts/msyhbd.ttc",  "Microsoft YaHei"),
+    ("C:/Windows/Fonts/simhei.ttf",  "SimHei"),
+    ("C:/Windows/Fonts/simsun.ttc",  "SimSun"),
+    ("C:/Windows/Fonts/simkai.ttf",  "KaiTi"),
+]
+_registered_cn_fonts: list[str] = []
+for _fp, _fn in _WIN_FONT_CANDIDATES:
+    if Path(_fp).exists():
+        try:
+            _fm.fontManager.addfont(_fp)
+            if _fn not in _registered_cn_fonts:
+                _registered_cn_fonts.append(_fn)
+        except Exception:
+            pass
+
+rcParams["font.family"] = "sans-serif"
+rcParams["font.sans-serif"] = (_registered_cn_fonts or ["Microsoft YaHei", "SimHei"]) + ["DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 SAMPLE_HEIGHT_MM = 100.0
@@ -564,8 +584,118 @@ def analyze():
         return jsonify({"error": str(e)}), 500
 
 
+def _fig_aic_pick_plotly(name: str, time_s, wf, onset_idx: int):
+    """Return Plotly JSON for an interactive AIC first-arrival chart.
+    Returns None if plotly is not installed."""
+    try:
+        from plotly.subplots import make_subplots
+        import plotly.graph_objects as go
+    except ImportError:
+        return None
+
+    t_us = time_s * 1e6
+    aic = compute_aic_curve(wf)
+    aic_lo, aic_hi = float(np.nanmin(aic)), float(np.nanmax(aic))
+    span = aic_hi - aic_lo
+    aic_n = (aic - aic_lo) / span if (np.isfinite(span) and span > 1e-30) else np.zeros_like(aic)
+
+    onset_t = float(t_us[onset_idx])
+
+    # Downsample for browser performance, but keep full resolution near the onset
+    n = len(t_us)
+    if n > 6000:
+        step = max(1, n // 6000)
+        base_idx = np.arange(0, n, step)
+        fine_idx = np.arange(max(0, onset_idx - 40), min(n, onset_idx + 40))
+        plot_idx = np.sort(np.unique(np.concatenate([base_idx, fine_idx])))
+    else:
+        plot_idx = np.arange(n)
+
+    tp  = t_us[plot_idx].tolist()
+    wp  = wf[plot_idx].tolist()
+    ap  = aic[plot_idx].tolist()
+    anp = aic_n[plot_idx].tolist()
+
+    wf_min, wf_max   = float(np.min(wp)), float(np.max(wp))
+    aic_min, aic_max = float(np.nanmin(ap)), float(np.nanmax(ap))
+    font_fam = "Microsoft YaHei, SimHei, Arial, sans-serif"
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        subplot_titles=["波形与初至", "AIC 曲线与拾取位置"],
+        vertical_spacing=0.10,
+    )
+
+    # Waveform
+    fig.add_trace(go.Scatter(
+        x=tp, y=wp, mode="lines", name="电压 (去直流)",
+        line=dict(color="#2c3e50", width=0.8), opacity=0.85,
+        hovertemplate="t=%{x:.3f} μs<br>V=%{y:.6f} V<extra></extra>",
+    ), row=1, col=1)
+
+    # Onset vline (waveform subplot) — represented as a 2-point Scatter
+    fig.add_trace(go.Scatter(
+        x=[onset_t, onset_t], y=[wf_min, wf_max],
+        mode="lines", name=f"AIC 初至 {onset_t:.2f} μs",
+        line=dict(color="#3498db", width=2, dash="dash"),
+    ), row=1, col=1)
+
+    # AIC curve
+    fig.add_trace(go.Scatter(
+        x=tp, y=ap, mode="lines", name="AIC 曲线",
+        line=dict(color="#2980b9", width=0.8),
+        hovertemplate="t=%{x:.3f} μs<br>AIC=%{y:.2f}<extra></extra>",
+    ), row=2, col=1)
+
+    # Normalized AIC overlay
+    fig.add_trace(go.Scatter(
+        x=tp, y=anp, mode="lines", name="归一化 AIC",
+        line=dict(color="gray", width=0.4), opacity=0.5,
+        hovertemplate="t=%{x:.3f} μs<br>norm=%{y:.4f}<extra></extra>",
+    ), row=2, col=1)
+
+    # Onset vline (AIC subplot)
+    fig.add_trace(go.Scatter(
+        x=[onset_t, onset_t], y=[aic_min, aic_max],
+        mode="lines", name="_onset_aic",
+        line=dict(color="#3498db", width=2, dash="dash"),
+        showlegend=False,
+    ), row=2, col=1)
+
+    ax_style = dict(
+        showgrid=True, gridcolor="rgba(0,0,0,0.08)",
+        title_font=dict(family=font_fam),
+        tickfont=dict(family=font_fam),
+        linecolor="rgba(0,0,0,0.2)",
+    )
+    fig.update_layout(
+        title=dict(
+            text=f"AIC 初至拾取 — {name}",
+            font=dict(size=14, family=font_fam, color="#1a2332"),
+        ),
+        height=600,
+        hovermode="x unified",
+        font=dict(family=font_fam, size=11),
+        plot_bgcolor="white",
+        paper_bgcolor="#fafafa",
+        legend=dict(
+            x=0.01, y=0.99, bgcolor="rgba(255,255,255,0.92)",
+            bordercolor="rgba(0,0,0,0.12)", borderwidth=1,
+            font=dict(family=font_fam),
+        ),
+        margin=dict(l=75, r=20, t=65, b=55),
+    )
+    fig.update_xaxes(title_text="时间 (μs)", row=2, col=1, **ax_style)
+    fig.update_xaxes(showticklabels=False, row=1, col=1,
+                     **{k: v for k, v in ax_style.items() if k != "title_text"})
+    fig.update_yaxes(title_text="电压 (V)", row=1, col=1, **ax_style)
+    fig.update_yaxes(title_text="AIC 值",   row=2, col=1, **ax_style)
+
+    return fig.to_json()
+
+
 def _do_single(zd, td):
-    za, zch1, zch2 = _zero_arrival(zd)
+    za, _, _ = _zero_arrival(zd)
 
     ch2s = sorted(td.glob("*CH2*"))
     if not ch2s:
@@ -606,8 +736,15 @@ def _do_single(zd, td):
         "filename": ch2p.name,
     }
 
-    f1 = _fig_aic_pick(ch2p.name, c2["time_s"], c2["waveform"], c2["onset_idx"])
+    aic_plotly = _fig_aic_pick_plotly(ch2p.name, c2["time_s"], c2["waveform"], c2["onset_idx"])
     f2 = _fig_analysis(c2["time_s"], c2["waveform"], ar, c2["fs"])
+
+    images: dict = {"waveform_analysis": _fig_to_b64(f2)}
+    if aic_plotly is not None:
+        images["aic_pick_plotly"] = aic_plotly
+    else:
+        f1 = _fig_aic_pick(ch2p.name, c2["time_s"], c2["waveform"], c2["onset_idx"])
+        images["aic_pick"] = _fig_to_b64(f1)
 
     return jsonify({
         "mode": "single",
@@ -630,10 +767,7 @@ def _do_single(zd, td):
             "rise_time_us": round(ar["energy"]["rise_time_s"] * 1e6, 2),
             "snr_db": round(ar["estimated_snr_db"], 1),
         },
-        "images": {
-            "aic_pick": _fig_to_b64(f1),
-            "waveform_analysis": _fig_to_b64(f2),
-        },
+        "images": images,
     })
 
 

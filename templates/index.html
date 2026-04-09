@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>波形分析系统</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
 :root {
     --bg:       #f0f2f5;
@@ -184,7 +185,7 @@ main{max-width:1140px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
     display:none;align-items:center;justify-content:center;z-index:1100;padding:1rem;
 }
 #lightbox.show{display:flex}
-#lightbox img{max-width:95vw;max-height:92vh;border-radius:8px;box-shadow:0 0 60px rgba(0,0,0,.8);cursor:default;animation:lbIn .2s ease}
+#lightbox img{max-width:95vw;max-height:92vh;border-radius:8px;box-shadow:0 0 60px rgba(0,0,0,.8);cursor:default;animation:lbIn .2s ease;transform-origin:center center;user-select:none;-webkit-user-select:none}
 @keyframes lbIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
 #lb-close{
     position:fixed;top:1rem;right:1.4rem;color:#fff;font-size:1.4rem;
@@ -348,7 +349,7 @@ main{max-width:1140px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
 <div id="lightbox" onclick="closeLightbox()">
     <button id="lb-close" onclick="closeLightbox()">✕</button>
     <img id="lb-img" src="" onclick="event.stopPropagation()">
-    <div id="lb-hint">单击图片外区域或按 Esc 关闭</div>
+    <div id="lb-hint">滚轮缩放 · 拖动平移 · 双击还原 · 点击外区域或 Esc 关闭</div>
 </div>
 
 <script>
@@ -411,19 +412,83 @@ let mode = null, zeroFiles = [], testFiles = [], sessionId = null;
     raf = requestAnimationFrame(draw);
 })();
 
-/* ---- Lightbox ---- */
+/* ---- Lightbox with zoom/pan ---- */
+const _lb = { scale: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0, slx: 0, sly: 0 };
+
+function _lbTransform() {
+    const img = document.getElementById('lb-img');
+    img.style.transform = `translate(${_lb.x}px,${_lb.y}px) scale(${_lb.scale})`;
+    img.style.cursor = _lb.scale > 1 ? 'grab' : 'default';
+}
+function _lbReset() {
+    _lb.scale = 1; _lb.x = 0; _lb.y = 0;
+    const img = document.getElementById('lb-img');
+    img.style.transition = 'transform .2s ease';
+    _lbTransform();
+    setTimeout(() => img.style.transition = '', 220);
+}
 function openLightbox(src) {
-    document.getElementById('lb-img').src = src;
+    _lb.scale = 1; _lb.x = 0; _lb.y = 0;
+    const img = document.getElementById('lb-img');
+    img.src = src;
+    img.style.transform = '';
+    img.style.cursor = 'default';
     document.getElementById('lightbox').classList.add('show');
     document.body.style.overflow = 'hidden';
 }
 function closeLightbox() {
     document.getElementById('lightbox').classList.remove('show');
     document.body.style.overflow = '';
+    _lb.scale = 1; _lb.x = 0; _lb.y = 0;
 }
+
+/* Scroll-wheel zoom */
+document.getElementById('lightbox').addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const img = document.getElementById('lb-img');
+    if (!img.src || img.style.display === 'none') return;
+    const factor = e.deltaY < 0 ? 1.25 : 0.8;
+    const newScale = Math.max(0.5, Math.min(14, _lb.scale * factor));
+    const rect = img.getBoundingClientRect();
+    const mx = e.clientX - (rect.left + rect.width  / 2);
+    const my = e.clientY - (rect.top  + rect.height / 2);
+    const ratio = newScale / _lb.scale;
+    _lb.x = _lb.x * ratio + mx * (1 - ratio);
+    _lb.y = _lb.y * ratio + my * (1 - ratio);
+    _lb.scale = newScale;
+    _lbTransform();
+}, { passive: false });
+
+/* Drag to pan */
+document.getElementById('lb-img').addEventListener('mousedown', function(e) {
+    if (_lb.scale <= 1) return;
+    _lb.dragging = true;
+    _lb.sx = e.clientX; _lb.sy = e.clientY;
+    _lb.slx = _lb.x;   _lb.sly = _lb.y;
+    this.style.cursor = 'grabbing';
+    e.preventDefault();
+});
+document.addEventListener('mousemove', function(e) {
+    if (!_lb.dragging) return;
+    _lb.x = _lb.slx + (e.clientX - _lb.sx);
+    _lb.y = _lb.sly + (e.clientY - _lb.sy);
+    _lbTransform();
+});
+document.addEventListener('mouseup', function() {
+    if (_lb.dragging) {
+        _lb.dragging = false;
+        const img = document.getElementById('lb-img');
+        img.style.cursor = _lb.scale > 1 ? 'grab' : 'default';
+    }
+});
+/* Double-click to reset */
+document.getElementById('lb-img').addEventListener('dblclick', function(e) {
+    _lbReset(); e.stopPropagation();
+});
+
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
 document.addEventListener('click', e => {
-    if (e.target.matches('#res-body img, #group-display img')) openLightbox(e.target.src);
+    if (e.target.matches('#res-body img, #group-display img, #dw-display img')) openLightbox(e.target.src);
 });
 
 /* ---- Count-up 数字动画 ---- */
@@ -510,6 +575,8 @@ function si(lb, vl, raw, unit = '', dec = 0) {
 function render(d) {
     const sec = document.getElementById('results'); sec.style.display = 'block';
     let h = '<div class="summary-grid">';
+    let pendingPlotly = null;  // { containerId, json }
+
     if (d.mode === 'single') {
         const s = d.summary;
         h += si('分析文件', s.file);
@@ -545,11 +612,20 @@ function render(d) {
         h += `<div id="dw-display"></div>`;
     }
 
-    if (d.images.aic_pick)
+    /* AIC 初至拾取 — 优先使用 Plotly 交互图 */
+    if (d.images && d.images.aic_pick_plotly) {
+        h += `<div class="img-block reveal">
+            <h3>AIC 初至拾取结果 <span style="font-size:.7em;color:var(--muted);text-transform:none;font-weight:400">（滚轮缩放 · 拖动平移 · 双击还原）</span></h3>
+            <div id="aic-plotly-chart" style="width:100%;border-radius:10px;border:1px solid var(--border);box-shadow:0 4px 24px rgba(0,0,0,.12);background:#fafafa;min-height:580px"></div>
+        </div>`;
+        pendingPlotly = { id: 'aic-plotly-chart', json: d.images.aic_pick_plotly };
+    } else if (d.images && d.images.aic_pick) {
         h += `<div class="img-block reveal"><h3>AIC 初至拾取结果</h3><img src="data:image/png;base64,${d.images.aic_pick}"></div>`;
-    if (d.images.waveform_analysis)
+    }
+
+    if (d.images && d.images.waveform_analysis)
         h += `<div class="img-block reveal"><h3>波形特征分析</h3><img src="data:image/png;base64,${d.images.waveform_analysis}"></div>`;
-    if (d.images.overview)
+    if (d.images && d.images.overview)
         h += `<div class="img-block reveal"><h3>波形特征参数变化总览</h3><img src="data:image/png;base64,${d.images.overview}"></div>`;
 
     if (d.mode === 'process' && d.session_id) {
@@ -568,6 +644,24 @@ function render(d) {
     rb.innerHTML = h;
     staggerReveal(rb);
     sec.scrollIntoView({ behavior: 'smooth' });
+
+    /* 渲染 Plotly 交互图（需在 innerHTML 设置后执行） */
+    if (pendingPlotly) {
+        requestAnimationFrame(() => {
+            const el = document.getElementById(pendingPlotly.id);
+            if (!el) return;
+            try {
+                const fig = JSON.parse(pendingPlotly.json);
+                Plotly.newPlot(el, fig.data, fig.layout, {
+                    scrollZoom: true,
+                    responsive: true,
+                    displayModeBar: true,
+                    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+                    displaylogo: false,
+                });
+            } catch(e) { console.error('Plotly render error:', e); }
+        });
+    }
 }
 
 function dlExcel() {
