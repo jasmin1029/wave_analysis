@@ -32,16 +32,24 @@ from process_folder_csv import (
     preprocess_voltage, find_excitation_end,
 )
 
-# ── 中文字体注册：主动向 font manager 注册字体文件，避免缓存失效导致乱码 ──
-_WIN_FONT_CANDIDATES = [
+# ── 中文字体注册：支持 Windows 本地运行和 Linux（Render）部署 ──
+_CN_FONT_CANDIDATES = [
+    # Windows 字体路径
     ("C:/Windows/Fonts/msyh.ttc",    "Microsoft YaHei"),
     ("C:/Windows/Fonts/msyhbd.ttc",  "Microsoft YaHei"),
     ("C:/Windows/Fonts/simhei.ttf",  "SimHei"),
     ("C:/Windows/Fonts/simsun.ttc",  "SimSun"),
     ("C:/Windows/Fonts/simkai.ttf",  "KaiTi"),
+    # Linux 字体路径（apt-get install fonts-wqy-microhei）
+    ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "WenQuanYi Micro Hei"),
+    ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",   "WenQuanYi Zen Hei"),
+    # Linux 字体路径（apt-get install fonts-noto-cjk）
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+    ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",      "Noto Sans CJK SC"),
+    ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
 ]
 _registered_cn_fonts: list[str] = []
-for _fp, _fn in _WIN_FONT_CANDIDATES:
+for _fp, _fn in _CN_FONT_CANDIDATES:
     if Path(_fp).exists():
         try:
             _fm.fontManager.addfont(_fp)
@@ -51,7 +59,7 @@ for _fp, _fn in _WIN_FONT_CANDIDATES:
             pass
 
 rcParams["font.family"] = "sans-serif"
-rcParams["font.sans-serif"] = (_registered_cn_fonts or ["Microsoft YaHei", "SimHei"]) + ["DejaVu Sans"]
+rcParams["font.sans-serif"] = (_registered_cn_fonts or ["WenQuanYi Micro Hei", "Microsoft YaHei", "SimHei"]) + ["DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 SAMPLE_HEIGHT_MM = 100.0
