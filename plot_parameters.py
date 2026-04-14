@@ -11,25 +11,27 @@ import numpy as np
 from matplotlib import rcParams
 from openpyxl import load_workbook
 
-_CN_FONT_CANDIDATES = [
-    ("C:/Windows/Fonts/simhei.ttf",  "SimHei"),
-    ("C:/Windows/Fonts/msyh.ttc",    "Microsoft YaHei"),
-    ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "WenQuanYi Micro Hei"),
-    ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",   "WenQuanYi Zen Hei"),
-    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
-    ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",      "Noto Sans CJK SC"),
+_CN_FONT_PATHS = [
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 ]
 _registered: list[str] = []
-for _fp, _fn in _CN_FONT_CANDIDATES:
+for _fp in _CN_FONT_PATHS:
     if Path(_fp).exists():
         try:
             _fm.fontManager.addfont(_fp)
-            if _fn not in _registered:
-                _registered.append(_fn)
+            _name = _fm.FontProperties(fname=_fp).get_name()
+            if _name not in _registered:
+                _registered.append(_name)
         except Exception:
             pass
 
-rcParams["font.sans-serif"] = (_registered or ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei"]) + ["DejaVu Sans"]
+rcParams["font.sans-serif"] = _registered + ["DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 ROOT = Path(__file__).resolve().parent

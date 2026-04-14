@@ -33,33 +33,36 @@ from process_folder_csv import (
 )
 
 # ── 中文字体注册：支持 Windows 本地运行和 Linux（Render）部署 ──
-_CN_FONT_CANDIDATES = [
-    # Windows 字体路径
-    ("C:/Windows/Fonts/msyh.ttc",    "Microsoft YaHei"),
-    ("C:/Windows/Fonts/msyhbd.ttc",  "Microsoft YaHei"),
-    ("C:/Windows/Fonts/simhei.ttf",  "SimHei"),
-    ("C:/Windows/Fonts/simsun.ttc",  "SimSun"),
-    ("C:/Windows/Fonts/simkai.ttf",  "KaiTi"),
-    # Linux 字体路径（apt-get install fonts-wqy-microhei）
-    ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "WenQuanYi Micro Hei"),
-    ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",   "WenQuanYi Zen Hei"),
-    # Linux 字体路径（apt-get install fonts-noto-cjk）
-    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
-    ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",      "Noto Sans CJK SC"),
-    ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+# 用 FontProperties(fname).get_name() 读取字体文件内部的实际名称，
+# 避免硬编码名称与文件不匹配导致 matplotlib 找不到字体
+_CN_FONT_PATHS = [
+    # Windows
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/simsun.ttc",
+    "C:/Windows/Fonts/simkai.ttf",
+    # Linux: apt-get install fonts-wqy-microhei
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    # Linux: apt-get install fonts-noto-cjk
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 ]
 _registered_cn_fonts: list[str] = []
-for _fp, _fn in _CN_FONT_CANDIDATES:
+for _fp in _CN_FONT_PATHS:
     if Path(_fp).exists():
         try:
             _fm.fontManager.addfont(_fp)
-            if _fn not in _registered_cn_fonts:
-                _registered_cn_fonts.append(_fn)
+            _name = _fm.FontProperties(fname=_fp).get_name()
+            if _name not in _registered_cn_fonts:
+                _registered_cn_fonts.append(_name)
         except Exception:
             pass
 
 rcParams["font.family"] = "sans-serif"
-rcParams["font.sans-serif"] = (_registered_cn_fonts or ["WenQuanYi Micro Hei", "Microsoft YaHei", "SimHei"]) + ["DejaVu Sans"]
+rcParams["font.sans-serif"] = _registered_cn_fonts + ["DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 SAMPLE_HEIGHT_MM = 100.0
