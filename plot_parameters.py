@@ -11,14 +11,17 @@ import numpy as np
 from matplotlib import rcParams
 from openpyxl import load_workbook
 
+_FONTS_DIR = Path(__file__).parent / "fonts"
 _CN_FONT_PATHS = [
+    str(_FONTS_DIR / "wqy-microhei.ttc"),
+    str(_FONTS_DIR / "wqy-zenhei.ttc"),
+    str(_FONTS_DIR / "NotoSansSC-Regular.otf"),
+    str(_FONTS_DIR / "simhei.ttf"),
     "C:/Windows/Fonts/simhei.ttf",
     "C:/Windows/Fonts/msyh.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 ]
 _registered: list[str] = []
 for _fp in _CN_FONT_PATHS:

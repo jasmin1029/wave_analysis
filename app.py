@@ -32,23 +32,24 @@ from process_folder_csv import (
     preprocess_voltage, find_excitation_end,
 )
 
-# ── 中文字体注册：支持 Windows 本地运行和 Linux（Render）部署 ──
-# 用 FontProperties(fname).get_name() 读取字体文件内部的实际名称，
-# 避免硬编码名称与文件不匹配导致 matplotlib 找不到字体
+# ── 中文字体注册：优先使用项目内 fonts/ 目录，再找系统字体 ──
+# 将字体文件提交到仓库可确保在任何部署环境（Render/Linux）下都能正常显示中文
+_FONTS_DIR = Path(__file__).parent / "fonts"
 _CN_FONT_PATHS = [
-    # Windows
+    # 项目内置字体（优先，跨平台可靠）
+    str(_FONTS_DIR / "wqy-microhei.ttc"),
+    str(_FONTS_DIR / "wqy-zenhei.ttc"),
+    str(_FONTS_DIR / "NotoSansSC-Regular.otf"),
+    str(_FONTS_DIR / "NotoSansSC-Regular.ttf"),
+    str(_FONTS_DIR / "simhei.ttf"),
+    # Windows 系统字体
     "C:/Windows/Fonts/msyh.ttc",
-    "C:/Windows/Fonts/msyhbd.ttc",
     "C:/Windows/Fonts/simhei.ttf",
     "C:/Windows/Fonts/simsun.ttc",
-    "C:/Windows/Fonts/simkai.ttf",
-    # Linux: apt-get install fonts-wqy-microhei
+    # Linux 系统字体（apt-get install fonts-wqy-microhei）
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-    # Linux: apt-get install fonts-noto-cjk
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 ]
 _registered_cn_fonts: list[str] = []
 for _fp in _CN_FONT_PATHS:
