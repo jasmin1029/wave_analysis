@@ -209,6 +209,8 @@ main{max-width:1140px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
 .btn-dw{background:rgba(46,134,222,.1);color:var(--accent);border:1px solid rgba(46,134,222,.3)}
 .btn-dw:hover{background:rgba(46,134,222,.2);transform:translateY(-1px);box-shadow:0 4px 12px rgba(46,134,222,.18)}
 .btn-dw.active{background:rgba(46,134,222,.22);border-color:var(--accent)}
+.btn-report{background:rgba(108,99,255,.1);color:var(--purple);border:1px solid rgba(108,99,255,.3)}
+.btn-report:hover{background:rgba(108,99,255,.2);transform:translateY(-1px);box-shadow:0 4px 12px rgba(108,99,255,.18)}
 .btn-group{background:var(--card);color:var(--text);border:1px solid var(--border)}
 .btn-group:hover{border-color:var(--border-h);color:var(--accent);transform:translateY(-1px)}
 .btn-group.active{background:rgba(0,212,255,.1);color:var(--accent);border-color:var(--accent)}
@@ -608,7 +610,7 @@ function render(d) {
 
     if (d.mode === 'single' && d.session_id) {
         sessionId = d.session_id;
-        h += `<div class="toolbar reveal"><span class="toolbar-label">导出</span><button class="btn-sm btn-excel" onclick="dlExcel()">📥 导出 Excel</button><button class="btn-sm btn-dw" id="btn-dw" onclick="loadDirectWave(this)">🔬 直达波特征分析</button></div>`;
+        h += `<div class="toolbar reveal"><span class="toolbar-label">导出</span><button class="btn-sm btn-excel" onclick="dlExcel()">📥 导出 Excel</button><button class="btn-sm btn-report" onclick="dlReport()">📄 导出分析报告</button><button class="btn-sm btn-dw" id="btn-dw" onclick="loadDirectWave(this)">🔬 直达波特征分析</button></div>`;
         h += `<div id="dw-display"></div>`;
     }
 
@@ -633,6 +635,7 @@ function render(d) {
         h += `<div class="toolbar reveal">`;
         h += `<span class="toolbar-label">导出</span>`;
         h += `<button class="btn-sm btn-excel" onclick="dlExcel()">📥 导出 Excel</button>`;
+        h += `<button class="btn-sm btn-report" onclick="dlReport()">📄 导出分析报告</button>`;
         h += `<span class="toolbar-label" style="margin-left:1rem">分项曲线</span>`;
         d.groups.forEach(g => {
             h += `<button class="btn-sm btn-group" data-idx="${g.idx}" onclick="loadGroup(this,${g.idx})">${g.title}</button>`;
@@ -667,6 +670,12 @@ function render(d) {
 function dlExcel() {
     if (!sessionId) { toast('请先进行分析'); return; }
     window.open('/api/export_excel/' + sessionId, '_blank');
+}
+
+function dlReport() {
+    if (!sessionId) { toast('请先进行分析'); return; }
+    toast('正在生成分析报告，请稍候…');
+    window.open('/api/export_report/' + sessionId, '_blank');
 }
 
 async function loadDirectWave(btn) {

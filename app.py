@@ -11,7 +11,10 @@ import tempfile
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
+
+from matplotlib.backends.backend_pdf import PdfPages
 
 import matplotlib
 matplotlib.use("Agg")
@@ -1125,6 +1128,344 @@ def export_direct_wave_excel(sid):
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
         download_name="direct_wave_analysis.xlsx",
+    )
+
+
+_REPORT_W = 11.69  # A4 横向宽度（英寸），所有报告页统一此宽度
+
+
+def _pdf_save(pdf: PdfPages, fig) -> None:
+    """统一所有报告页宽度后保存并关闭 figure。"""
+    orig_w, orig_h = fig.get_size_inches()
+    fig.set_size_inches(_REPORT_W, orig_h * _REPORT_W / orig_w)
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def _fig_cover(title: str, lines: list[tuple[str, str]], subtitle: str = "") -> object:
+    """生成白色专业封面，lines = [(标签, 值), ...]。"""
+    fig = plt.figure(figsize=(_REPORT_W, 8.27))
+    fig.patch.set_facecolor("white")
+
+    # ── 顶部蓝色标题栏 (上方 24%) ──
+    ax_hdr = fig.add_axes([0, 0.76, 1, 0.24])
+    ax_hdr.set_xlim(0, 1); ax_hdr.set_ylim(0, 1)
+    ax_hdr.set_axis_off()
+
+    # 渐变背景：用多个矩形条模拟
+    n_grad = 40
+    for k in range(n_grad):
+        t = k / n_grad
+        r = int(0x14 + t * (0x1a - 0x14))
+        g = int(0x3a + t * (0x6e - 0x3a))
+        b = int(0x5c + t * (0xbf - 0x5c))
+        ax_hdr.add_patch(plt.Rectangle(
+            (k / n_grad, 0), 1 / n_grad, 1,
+            facecolor=(r / 255, g / 255, b / 255), zorder=0, lw=0
+        ))
+
+    # 左侧装饰竖条
+    ax_hdr.add_patch(plt.Rectangle((0, 0), 0.006, 1, facecolor="white", alpha=0.35, zorder=1, lw=0))
+
+    ax_hdr.text(0.5, 0.64, title,
+                transform=ax_hdr.transAxes, fontsize=28, fontweight="bold",
+                color="white", ha="center", va="center",
+                zorder=2)
+    if subtitle:
+        ax_hdr.text(0.5, 0.22, subtitle,
+                    transform=ax_hdr.transAxes, fontsize=10.5,
+                    color="#c8dff5", ha="center", va="center",
+                    zorder=2)
+
+    # ── 蓝灰色副标题条 (标题栏下方细带) ──
+    ax_sub = fig.add_axes([0, 0.715, 1, 0.045])
+    ax_sub.set_axis_off()
+    ax_sub.add_patch(plt.Rectangle((0, 0), 1, 1, facecolor="#eaf2fb", lw=0))
+    now = datetime.now().strftime("%Y-%m-%d  %H:%M")
+    ax_sub.text(0.98, 0.5, f"生成时间：{now}",
+                transform=ax_sub.transAxes, fontsize=9,
+                color="#4a6fa5", ha="right", va="center")
+    ax_sub.text(0.02, 0.5, "超声波形分析系统  /  Ultrasonic Waveform Analysis",
+                transform=ax_sub.transAxes, fontsize=9,
+                color="#4a6fa5", ha="left", va="center")
+
+    # ── 主内容区 (白色，带浅灰边框) ──
+    ax = fig.add_axes([0.04, 0.04, 0.92, 0.655])
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_axis_off()
+    # 外框
+    ax.add_patch(plt.Rectangle((0, 0), 1, 1,
+                               facecolor="white", edgecolor="#d0dce8",
+                               linewidth=0.8, zorder=0))
+
+    n = len(lines)
+    cols = 2 if n > 6 else 1
+    per_col = (n + cols - 1) // cols
+    col_w = 1.0 / cols
+
+    # 列分隔线
+    if cols == 2:
+        ax.axvline(0.5, color="#d8e4ef", lw=0.8, ymin=0.04, ymax=0.96)
+
+    CARD_H = 0.88 / per_col   # 每行卡片高度
+
+    for i, (label, value) in enumerate(lines):
+        col = i // per_col
+        row = i % per_col
+        x0 = col * col_w
+        y_top = 0.97 - row * CARD_H
+
+        # 奇行浅色底
+        if row % 2 == 0:
+            ax.add_patch(plt.Rectangle(
+                (x0 + 0.005, y_top - CARD_H + 0.005),
+                col_w - 0.01, CARD_H - 0.008,
+                facecolor="#f5f8fc", zorder=1, lw=0
+            ))
+
+        # 行底部分隔线（除最后一行）
+        if row < per_col - 1:
+            ax.axhline(y_top - CARD_H + 0.005, color="#dde8f0", lw=0.6,
+                       xmin=x0 + 0.01, xmax=x0 + col_w - 0.01)
+
+        # 蓝色左侧小方块装饰
+        ax.add_patch(plt.Rectangle(
+            (x0 + 0.012, y_top - CARD_H * 0.55),
+            0.006, CARD_H * 0.34,
+            facecolor="#2e86de", zorder=2, lw=0
+        ))
+
+        mid_y = y_top - CARD_H * 0.46
+
+        ax.text(x0 + 0.028, mid_y + CARD_H * 0.08, label,
+                fontsize=9, color="#5a7a9a", ha="left", va="center",
+                transform=ax.transAxes, zorder=3)
+        ax.text(x0 + col_w - 0.025, mid_y - CARD_H * 0.08, value,
+                fontsize=11.5, color="#1a2e45", ha="right", va="center",
+                transform=ax.transAxes, fontweight="bold", zorder=3)
+
+    # ── 底部页脚 ──
+    ax_foot = fig.add_axes([0.04, 0.005, 0.92, 0.03])
+    ax_foot.set_axis_off()
+    ax_foot.axhline(0.9, color="#2e86de", lw=1.0, alpha=0.4)
+    ax_foot.text(0.5, 0.3, "本报告由超声波形分析系统自动生成，仅供参考",
+                 transform=ax_foot.transAxes, fontsize=8,
+                 color="#8fa8c0", ha="center", va="center")
+    return fig
+
+
+def _build_report_pdf(entry: dict, mode: str) -> io.BytesIO:
+    """根据缓存 entry 构建完整分析报告 PDF，返回 BytesIO。"""
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        if mode == "single":
+            _report_single(pdf, entry)
+        else:
+            _report_process(pdf, entry)
+    buf.seek(0)
+    return buf
+
+
+def _add_page_header(fig, page_title: str, filename: str = "", page_no: int = 0, total: int = 0) -> None:
+    """
+    在 figure 顶部插入页眉条。
+    策略：完全不修改现有 axes 位置，将页眉元素放置在图形坐标 y > 1.0
+    的区域外，由 bbox_inches='tight' 保存时自动扩展画布包含这部分内容。
+    这样可以保留 constrained_layout 的原有行列间距，消除子图内部文字重叠。
+    若原 suptitle 设置在 y >= 1.0（如 y=1.01），将其下移到图内避免被页眉遮盖。
+    """
+    from matplotlib.patches import Rectangle as _MRect
+
+    # suptitle 位于 y>=1.0 时会落入页眉背景区域，提前下移到图内
+    if fig._suptitle is not None:
+        _, sy = fig._suptitle.get_position()
+        if sy >= 1.0:
+            fig._suptitle.set_position((0.5, 0.975))
+
+    tf = fig.transFigure
+
+    # 背景矩形（y=1.0 ~ 1.065）
+    bg = _MRect((0, 1.0), 1.0, 0.065, transform=tf,
+                facecolor="#f0f5fb", clip_on=False, zorder=5)
+    fig.add_artist(bg)
+
+    # 蓝色底边线
+    fig.add_artist(plt.Line2D(
+        [0, 1], [1.003, 1.003], transform=tf,
+        color="#2e86de", lw=2.0, clip_on=False, zorder=6,
+    ))
+
+    # 左侧标题文字
+    fig.text(0.013, 1.038, f"超声波形分析报告  |  {page_title}",
+             transform=tf, fontsize=9.5, fontweight="bold",
+             color="#1a3a5c", va="center", clip_on=False, zorder=7)
+
+    # 右侧文件名 / 页码
+    right_parts = []
+    if filename:
+        right_parts.append(filename)
+    if page_no and total:
+        right_parts.append(f"第 {page_no} / {total} 页")
+    elif page_no:
+        right_parts.append(f"第 {page_no} 页")
+    if right_parts:
+        fig.text(0.987, 1.038, "  ·  ".join(right_parts),
+                 transform=tf, fontsize=8.5, color="#4a6fa5",
+                 va="center", ha="right", clip_on=False, zorder=7)
+
+
+def _report_single(pdf: PdfPages, entry: dict):
+    records = entry["records"]
+    rec = records[0]
+    pd0 = entry["param_data_list"][0]
+    za = entry["zero_arrival_us"]
+    wf = entry["waveform"]
+    onset = entry["onset_idx"]
+    fs = entry["fs"]
+    time_s = entry["time_s"]
+    filename = entry.get("filename", "—")
+
+    vel = pd0["波速 (m/s)"]
+    tr = pd0["传播时间 (μs)"]
+    ar = rec["analysis"]
+    amp = ar["amplitude"]
+    freq = ar["frequency"]
+    atten = ar["attenuation"]
+
+    vel_str = f"{vel:.0f} m/s" if np.isfinite(vel) else "N/A"
+    lines = [
+        ("分析模式",       "单次波形分析"),
+        ("数据文件",       filename),
+        ("ZERO到时 (μs)",  f"{za:.3f}"),
+        ("TEST到时 (μs)",  f"{pd0['TEST到时 (μs)']:.3f}"),
+        ("传播时间 (μs)",  f"{tr:.3f}"),
+        ("纵波波速",       vel_str),
+        ("主频",          f"{freq['dominant_freq']/1e3:.2f} kHz"),
+        ("频谱重心",       f"{freq['centroid_freq']/1e3:.2f} kHz"),
+        ("带宽",           f"{freq['bandwidth']/1e3:.2f} kHz"),
+        ("最大振幅 (V)",   f"{amp['peak_amplitude']:.6f}"),
+        ("峰峰值 (V)",     f"{amp['peak_to_peak']:.6f}"),
+        ("RMS振幅 (V)",    f"{amp['rms_amplitude']:.6f}"),
+        ("衰减系数 (/s)",  f"{atten['decay_coefficient']:.2f}"),
+        ("品质因子 Q",     f"{atten['quality_factor_Q']:.2f}"),
+        ("信噪比 (dB)",    f"{ar['estimated_snr_db']:.1f}"),
+    ]
+    total_pages = 4
+
+    cover = _fig_cover("超声波形分析报告", lines, "单次波形分析模式")
+    _pdf_save(pdf, cover)
+
+    f_aic = _fig_aic_pick(filename, time_s, wf, onset)
+    _add_page_header(f_aic, "AIC 初至拾取", filename, 2, total_pages)
+    _pdf_save(pdf, f_aic)
+
+    f_wa = _fig_analysis(time_s, wf, ar, fs)
+    _add_page_header(f_wa, "波形特征分析", filename, 3, total_pages)
+    _pdf_save(pdf, f_wa)
+
+    try:
+        f_dw = _fig_direct_wave(filename, time_s, wf, onset, fs)
+        _add_page_header(f_dw, "直达波特征分析", filename, 4, total_pages)
+        _pdf_save(pdf, f_dw)
+    except Exception:
+        pass
+
+    pdf.infodict()["Title"] = "超声波形分析报告 — 单次模式"
+    pdf.infodict()["Subject"] = filename
+    pdf.infodict()["Creator"] = "波形分析系统"
+
+
+def _report_process(pdf: PdfPages, entry: dict):
+    records = entry["records"]
+    param_data_list = entry["param_data_list"]
+    za = entry["zero_arrival_us"]
+    x = entry["x"]
+    n = len(records)
+
+    velocities = [p["波速 (m/s)"] for p in param_data_list if np.isfinite(p["波速 (m/s)"])]
+    v = np.array(velocities) if velocities else np.array([np.nan])
+    v_mean   = float(np.mean(v))
+    v_std    = float(np.std(v))
+    v_median = float(np.median(v))
+    v_min    = float(np.min(v))
+    v_max    = float(np.max(v))
+    cv       = v_std / v_mean * 100 if v_mean > 0 else float("nan")
+
+    def _pmean(k):
+        vals = [p[k] for p in param_data_list if np.isfinite(p[k])]
+        return np.mean(vals) if vals else float("nan")
+
+    lines = [
+        ("分析模式",       "过程波形批量分析"),
+        ("有效文件对数",   f"{n} 组"),
+        ("ZERO到时 (μs)",  f"{za:.3f}"),
+        ("波速均值",       f"{v_mean:.0f} m/s"),
+        ("波速标准差",     f"{v_std:.0f} m/s"),
+        ("变异系数 CV",    f"{cv:.2f} %"),
+        ("波速中位数",     f"{v_median:.0f} m/s"),
+        ("波速范围",       f"{v_min:.0f} ~ {v_max:.0f} m/s"),
+        ("均值主频",       f"{_pmean('主频 (kHz)'):.2f} kHz"),
+        ("均值峰峰值",     f"{_pmean('峰峰值 (V)'):.5f} V"),
+        ("均值品质因子Q",  f"{_pmean('品质因子Q'):.2f}"),
+        ("均值信噪比",     f"{_pmean('信噪比 (dB)'):.1f} dB"),
+        ("均值衰减系数",   f"{_pmean('衰减系数 (/s)'):.2f} /s"),
+        ("均值上升时间",   f"{_pmean('上升时间 (μs)'):.2f} μs"),
+    ]
+
+    trend_note = ""
+    if n >= 3:
+        first_v = [p["波速 (m/s)"] for p in param_data_list[:max(1, n // 3)] if np.isfinite(p["波速 (m/s)"])]
+        last_v  = [p["波速 (m/s)"] for p in param_data_list[2 * n // 3:] if np.isfinite(p["波速 (m/s)"])]
+        if first_v and last_v:
+            diff = np.mean(last_v) - np.mean(first_v)
+            if abs(diff) > v_std * 0.5:
+                trend_note = f"（注：序列末段相对初段波速{'升高' if diff > 0 else '降低'} {abs(diff):.0f} m/s）"
+
+    subtitle = f"批量分析  ·  {n} 组测量  ·  波速 {v_mean:.0f} ± {v_std:.0f} m/s{trend_note}"
+    cover = _fig_cover("超声波形分析报告", lines, subtitle)
+    _pdf_save(pdf, cover)
+
+    total_pages = 2 + len(PARAM_GROUPS)
+
+    f_ov = _fig_overview(param_data_list, x)
+    _add_page_header(f_ov, "全参数变化总览", f"{n} 组测量", 2, total_pages)
+    _pdf_save(pdf, f_ov)
+
+    for idx in range(len(PARAM_GROUPS)):
+        try:
+            fg = _fig_group(param_data_list, x, idx)
+            if fg._suptitle is not None:
+                fg._suptitle.set_visible(False)
+            _add_page_header(fg, PARAM_GROUPS[idx]["title"], f"{n} 组测量",
+                             idx + 3, total_pages)
+            _pdf_save(pdf, fg)
+        except Exception:
+            pass
+
+    pdf.infodict()["Title"] = "超声波形分析报告 — 批量模式"
+    pdf.infodict()["Subject"] = f"{n} 组测量"
+    pdf.infodict()["Creator"] = "波形分析系统"
+
+
+@app.route("/api/export_report/<sid>")
+def export_report(sid):
+    entry = _cache.get(sid)
+    if not entry:
+        return jsonify({"error": "会话已过期，请重新分析"}), 404
+
+    mode = "single" if "waveform" in entry else "process"
+    try:
+        buf = _build_report_pdf(entry, mode)
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "报告生成失败，请查看服务器日志"}), 500
+
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"波形分析报告_{now}.pdf",
     )
 
 
